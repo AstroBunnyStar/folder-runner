@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Folder Runner — run any local web folder in one file</title>
+<style>
+  :root{
+    --bg:#0a0c11; --panel:#11141c; --panel2:#161a24; --line:#212736;
+    --text:#e9edf6; --muted:#8a93a8; --accent:#4f8cff; --ok:#22c55e; --warn:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--bg); color:var(--text); overflow:hidden;
+    font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column; -webkit-font-smoothing:antialiased;
+  }
+  button,select,input{font:inherit;color:inherit}
+  header{
+    display:flex; align-items:center; gap:14px; padding:0 14px;
+    height:52px; min-height:52px; background:var(--panel); border-bottom:1px solid var(--line);
+    position:relative; z-index:5;
+  }
+  .brand{display:flex;align-items:center;gap:9px;font-weight:650;letter-spacing:.2px;white-space:nowrap}
+  .brand .mark{
+    width:22px;height:22px;border-radius:6px;
+    background:linear-gradient(145deg,#5b93ff,#2b5fd9);
+    box-shadow:0 0 0 1px #3a6bd8 inset, 0 4px 14px -6px #4f8cff;
+    display:grid;place-items:center;font-size:11px;font-weight:800;color:#fff
+  }
+  .where{
+    flex:1; min-width:0; color:var(--muted); font-size:12.5px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    padding:5px 10px; background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+  }
+  .acts{display:flex;align-items:center;gap:8px;flex-shrink:0}
+  button{
+    background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+    padding:6px 11px; cursor:pointer; transition:.12s; white-space:nowrap;
+  }
+  button:hover:not(:disabled){border-color:#33405a;background:#1c2130}
+  button:disabled{opacity:.38;cursor:default}
+  button.icon{padding:6px 10px;font-size:15px;line-height:1}
+  button.primary{background:linear-gradient(180deg,#5b93ff,#3a72e6);border-color:#4b82ee;color:#fff;font-weight:600}
+  button.primary:hover{background:linear-gradient(180deg,#6ba0ff,#4479ec)}
+  select{
+    background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+    padding:6px 8px; max-width:230px; cursor:pointer; outline:none;
+  }
+  main{flex:1;min-height:0;position:relative;display:flex}
+  #stage{flex:1;min-width:0;display:none;background:#fff}
+  #stage.on{display:block}
+  iframe{width:100%;height:100%;border:0;display:block;background:#fff}
+
+  #welcome{
+    position:absolute; inset:0; display:grid; place-items:center; padding:24px;
+    background:radial-gradient(1000px 520px at 50% -12%,#16203a 0%,var(--bg) 62%);
+    overflow:auto;
+  }
+  #welcome.hide{display:none}
+  .card{width:min(760px,100%);text-align:center}
+  h1{font-size:clamp(22px,3.4vw,32px);margin:0 0 10px;letter-spacing:-.5px}
+  .sub{color:var(--muted);margin:0 auto 26px;max-width:560px;font-size:14.5px}
+  .drop{
+    border:1.5px dashed #2c3547; border-radius:16px; padding:34px 22px;
+    background:#0e1219; transition:.15s; cursor:pointer;
+  }
+  .drop:hover{border-color:#4a5c7d;background:#10151f}
+  .drop .big{font-size:15px;font-weight:600;margin-bottom:4px}
+  .drop .hint{color:var(--muted);font-size:12.5px}
+  .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px}
+  .facts{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;margin-top:26px;color:var(--muted);font-size:12.5px}
+  .facts b{color:var(--text);font-weight:600}
+
+  #overlay{
+    position:fixed;inset:0;z-index:50;display:none;place-items:center;
+    background:rgba(8,10,15,.82);backdrop-filter:blur(3px);
+  }
+  #overlay.on{display:grid}
+  #overlay .box{
+    border:2px dashed var(--accent); border-radius:18px; padding:44px 60px;
+    background:#0d1424; text-align:center; font-size:17px; font-weight:600;
+  }
+  #toast{
+    position:fixed;left:50%;bottom:22px;transform:translate(-50%,14px);
+    background:#1b2230;border:1px solid #2c3547;color:var(--text);
+    padding:10px 16px;border-radius:10px;box-shadow:0 12px 34px -10px #000;
+    opacity:0;pointer-events:none;transition:.2s;z-index:60;max-width:min(90vw,640px);font-size:13px;
+  }
+  #toast.on{opacity:1;transform:translate(-50%,0)}
+  .spin{width:14px;height:14px;border:2px solid #3a4763;border-top-color:var(--accent);border-radius:50%;display:inline-block;vertical-align:-2px;animation:sp .7s linear infinite;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  input[type=file]{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="mark">▸</span>Folder Runner</div>
+  <div class="where" id="where">No folder loaded</div>
+  <div class="acts">
+    <button class="icon" id="btnBack" title="Back" disabled>‹</button>
+    <button class="icon" id="btnReload" title="Reload page" disabled>⟳</button>
+    <select id="entrySel" title="Choose a page" disabled></select>
+    <button id="btnChange" disabled>Change folder</button>
+  </div>
+</header>
+
+<main>
+  <div id="stage"><iframe id="frame" title="Running site"></iframe></div>
+  <section id="welcome">
+    <div class="card">
+      <h1>Run any folder of HTML, CSS &amp; JS</h1>
+      <p class="sub">Drop a whole website folder here. Every file, relative path and stylesheet keeps
+        working — even <code>fetch()</code>, ES modules and links between pages — with no server.</p>
+      <div class="drop" id="drop">
+        <div class="big">Drop a folder (or files) here</div>
+        <div class="hint">Everything stays on this computer · no uploads · no size limit</div>
+      </div>
+      <div class="row">
+        <button class="primary" id="btnFolder">Choose a folder…</button>
+        <button id="btnFiles">Choose files…</button>
+      </div>
+      <div class="facts">
+        <div><b>0</b> size limits</div>
+        <div><b>Instant</b> page switching</div>
+        <div><b>Offline</b> — one HTML file</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="overlay"><div class="box" id="overlayBox">Drop folder to run</div></div>
+<div id="toast"></div>
+
+<input type="file" id="dirInput" webkitdirectory directory multiple>
+<input type="file" id="filesInput" multiple>
+
+<script>
+(function vfsRunner() {
+'use strict';
+
+/* ───────────────────────────── helpers ───────────────────────────── */
+
+const $ = (s) => document.querySelector(s);
+const TOAST = $('#toast');
+let toastTimer = 0;
+function toast(msg, ms) {
+  TOAST.textContent = msg;
+  TOAST.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => TOAST.classList.remove('on'), ms || 3200);
+}
+
+function dirname(p) { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); }
+function basename(p) { const i = p.lastIndexOf('/'); return i < 0 ? p : p.slice(i + 1); }
+function norm(p) {
+  const out = [];
+  for (const part of String(p).replace(/\\/g, '/').split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') { out.pop(); continue; }
+    out.push(part);
+  }
+  return out.join('/');
+}
+function extOf(p) { const m = /\.([A-Za-z0-9]+)$/.exec(p); return m ? m[1].toLowerCase() : ''; }
+function isExternal(spec) { return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(spec) || spec.slice(0, 2) === '//'; }
+function objUrl(blob) { return URL.createObjectURL(blob); }
+
+const MIME = {
+  html: 'text/html', htm: 'text/html', xhtml: 'application/xhtml+xml',
+  css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', cjs: 'text/javascript',
+  json: 'application/json', map: 'application/json', jsonld: 'application/ld+json',
+  txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', xml: 'application/xml',
+  svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', jfif: 'image/jpeg',
+  gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', apng: 'image/apng',
+  ico: 'image/x-icon', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff',
+  woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf',
+  eot: 'application/vnd.ms-fontobject', sfnt: 'font/sfnt',
+  mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime',
+  mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', flac: 'audio/flac',
+  wasm: 'application/wasm', pdf: 'application/pdf', zip: 'application/zip',
+  glb: 'model/gltf-binary', gltf: 'model/gltf+json', obj: 'text/plain', ktx2: 'image/ktx2',
+  ts: 'text/plain', jsx: 'text/plain', tsx: 'text/plain', vue: 'text/plain', scss: 'text/plain', sass: 'text/plain'
+};
+function mimeFor(p) { return MIME[extOf(p)] || 'application/octet-stream'; }
+
+/* ───────────────────────────── state ───────────────────────────── */
+
+const state = {
+  files: new Map(),      // virtual path -> File
+  ci: null,              // lowercase path -> path
+  mid: null,             // lowercase path -> path (built on demand)
+  asset: new Map(),      // 'a:'+path -> object URL (typed blob)
+  text: new Map(),       // path -> string (only for text files)
+  cssUrl: new Map(),     // path -> Promise<object URL>
+  modUrl: new Map(),     // path -> Promise<object URL>
+  pages: new Map(),      // path -> Promise<{html,title}>
+  modBusy: new Set(),
+  mount: '',             // virtual root directory
+  entry: '',
+  current: '',
+  history: [],
+  hIndex: -1,
+  rootName: '',
+  loading: 0
+};
+
+/* ─────────────────────────── resolution ─────────────────────────── */
+
+function lookup(p) {
+  if (!p) return null;
+  if (state.files.has(p)) return p;
+  if (p.slice(-1) !== '/') {
+    const idx = p + '/index.html';
+    if (state.files.has(idx)) return idx;
+    const idx2 = p + '/index.htm';
+    if (state.files.has(idx2)) return idx2;
+  }
+  if (!state.ci) {
+    state.ci = new Map();
+    for (const k of state.files.keys()) state.ci.set(k.toLowerCase(), k);
+  }
+  return state.ci.get(p.toLowerCase()) || null;
+}
+
+/** Resolve a URL from a document/CSS/JS context into a virtual path. */
+function resolveAsset(fromDir, spec) {
+  if (!spec) return null;
+  let s = String(spec).trim();
+  if (!s || s[0] === '#' || s.slice(0, 5) === 'data:' || s.slice(0, 5) === 'blob:') return null;
+  if (isExternal(s)) return null;
+  const cut = s.search(/[?#]/);
+  if (cut >= 0) s = s.slice(0, cut);
+  try { s = decodeURI(s); } catch (e) {}
+  if (!s) return null;
+  s = s.replace(/\\/g, '/');
+  if (s[0] === '/') {
+    const abs = norm(s.slice(1));
+    return lookup(norm((state.mount ? state.mount + '/' : '') + abs)) || lookup(abs);
+  }
+  const full = norm((fromDir ? fromDir + '/' : '') + s);
+  return lookup(full);
+}
+
+function hashOf(spec) {
+  const i = String(spec).indexOf('#');
+  return i < 0 ? '' : String(spec).slice(i);
+}
+
+/* ─────────────────────────── asset URLs ─────────────────────────── */
+
+function assetUrl(path) {
+  const key = 'a:' + path;
+  let u = state.asset.get(key);
+  if (!u) {
+    const f = state.files.get(path);
+    if (!f) return '';
+    u = objUrl(new Blob([f], { type: mimeFor(path) }));
+    state.asset.set(key, u);
+  }
+  return u;
+}
+
+async function readText(path) {
+  if (state.text.has(path)) return state.text.get(path);
+  const f = state.files.get(path);
+  if (!f) return null;
+  const t = await f.text();
+  if (t.length <= 12 * 1024 * 1024) state.text.set(path, t);
+  return t;
+}
+
+/** Link-free blob URL for a raw text payload. */
+function textUrl(code) { return objUrl(new Blob([code], { type: 'text/javascript' })); }
+
+/* ─────────────────────────── CSS rewrite ─────────────────────────── */
+
+const CSS_RE = /@import\s+(?:url\(\s*)?(["'])([^"'\n]+)\1\s*\)?\s*([^;]*);|url\(\s*(["']?)([^)"'\n]+)\4\s*\)/g;
+
+function cssUrl(path) {
+  const hit = state.cssUrl.get(path);
+  if (hit) return hit;
+  const job = (async () => {
+    const src = await readText(path);
+    if (src == null) throw new Error('Missing stylesheet: ' + path);
+    const dir = dirname(path);
+    const out = await rewriteCss(src, dir);
+    return objUrl(new Blob([out], { type: 'text/css' }));
+  })();
+  state.cssUrl.set(path, job);
+  return job;
+}
+
+async function rewriteCss(src, dir) {
+  let out = '';
+  let last = 0;
+  let m;
+  const re = new RegExp(CSS_RE.source, 'g');
+  while ((m = re.exec(src))) {
+    out += src.slice(last, m.index);
+    if (m[2] !== undefined) {
+      const target = resolveAsset(dir, m[2]);
+      if (target) {
+        /* @import must be inlined-by-reference; a blob works for imports. */
+        out += '@import url("' + (await cssUrl(target)) + '")' + (m[3] || '') + ';';
+      } else {
+        out += m[0];
+      }
+    } else {
+      const spec = m[5];
+      if (spec && spec[0] !== '#' && spec.slice(0, 5) !== 'data:' && spec.slice(0, 5) !== 'blob:' && !isExternal(spec)) {
+        const target = resolveAsset(dir, spec);
+        out += target ? 'url("' + assetUrl(target) + hashOf(spec) + '")' : m[0];
+      } else {
+        out += m[0];
+      }
+    }
+    last = re.lastIndex;
+  }
+  return out + src.slice(last);
+}
+
+/* ────────────────────────── ES module rewrite ────────────────────────── */
+
+function moduleUrl(path) {
+  const hit = state.modUrl.get(path);
+  if (hit) return hit;
+  if (state.modBusy.has(path)) {
+    return Promise.reject(new Error('Circular module import at ' + path));
+  }
+  state.modBusy.add(path);
+  const job = (async () => {
+    const src = await readText(path);
+    if (src == null) throw new Error('Missing module: ' + path);
+    const out = await rewriteJs(src, dirname(path));
+    state.modBusy.delete(path);
+    return objUrl(new Blob([out], { type: 'text/javascript' }));
+  })().catch((err) => { state.modBusy.delete(path); throw err; });
+  state.modUrl.set(path, job);
+  return job;
+}
+
+async function resolveModuleSpec(spec, dir) {
+  if (!spec || isExternal(spec) || spec.slice(0, 5) === 'data:' || spec.slice(0, 5) === 'blob:') return null;
+  const clean = spec.replace(/[?#].*$/, '');
+  let target = resolveAsset(dir, clean);
+  if (!target) {
+    for (const suffix of ['.js', '.mjs', '/index.js']) {
+      target = resolveAsset(dir, clean + suffix);
+      if (target) break;
+    }
+  }
+  return target;
+}
+
+async function rewriteJs(src, dir) {
+  /* dynamic import("…") */
+  src = await replaceSpecs(src, /(\bimport\s*\(\s*)(["'])([^"'\n]+)\2/g, dir);
+  /* import … from "…" / export … from "…" */
+  src = await replaceSpecs(src, /(\bfrom\s*)(["'])([^"'\n]+)\2/g, dir);
+  /* bare side-effect import "…" */
+  src = await replaceSpecs(src, /(\bimport\s+)(["'])([^"'\n]+)\2/g, dir);
+  return src;
+}
+
+async function replaceSpecs(src, re, dir) {
+  let out = '';
+  let last = 0;
+  let m;
+  const rx = new RegExp(re.source, 'g');
+  while ((m = rx.exec(src))) {
+    out += src.slice(last, m.index);
+    let replacement = m[0];
+    try {
+      const target = await resolveModuleSpec(m[3], dir);
+      if (target) replacement = m[1] + m[2] + (await moduleUrl(target)) + m[2];
+    } catch (err) {
+      console.warn('[Folder Runner]', err.message, '— leaving specifier', m[3]);
+    }
+    out += replacement;
+    last = rx.lastIndex;
+  }
+  return out + src.slice(last);
+}
+
+/* ─────────────────────────── page builder ─────────────────────────── */
+
+const SHIM_SOURCE = '(' + vfsShim.toString() + ')();';
+
+function isModuleScript(el) {
+  return (el.getAttribute('type') || '').toLowerCase() === 'module';
+}
+
+function rewriteSrcset(value, dir) {
+  if (!value || value.indexOf('data:') >= 0) return null;
+  let touched = false;
+  const out = value.split(',').map((piece) => {
+    const s = piece.trim();
+    if (!s) return piece;
+    const parts = s.split(/\s+/);
+    const target = resolveAsset(dir, parts[0]);
+    if (target) { parts[0] = assetUrl(target); touched = true; }
+    return parts.join(' ');
+  }).join(', ');
+  return touched ? out : null;
+}
+
+function pageHtml(path) {
+  const hit = state.pages.get(path);
+  if (hit) return hit;
+  const job = buildPage(path);
+  state.pages.set(path, job);
+  job.catch(() => state.pages.delete(path));
+  return job;
+}
+
+async function buildPage(path) {
+  const raw = await readText(path);
+  if (raw == null) throw new Error('Page not found: ' + path);
+
+  const doc = new DOMParser().parseFromString(raw, 'text/html');
+  const root = doc.documentElement;
+  const dir = dirname(path);
+  root.setAttribute('data-vfs-path', path);
+  root.setAttribute('data-vfs-base', dir);
+
+  /* A <base> tag or a CSP meta would break the virtual layer. */
+  doc.querySelectorAll('base').forEach((el) => el.remove());
+  doc.querySelectorAll('meta[http-equiv]').forEach((el) => {
+    if (/content-security-policy/i.test(el.getAttribute('http-equiv') || '')) el.remove();
+  });
+
+  const jobs = [];
+
+  for (const el of doc.querySelectorAll('*')) {
+    const tag = el.localName.toLowerCase();
+
+    if (tag === 'script') {
+      const src = el.getAttribute('src');
+      if (src) {
+        const target = resolveAsset(dir, src);
+        if (!target) continue;
+        el.removeAttribute('integrity');
+        el.removeAttribute('crossorigin');
+        if (isModuleScript(el)) {
+          jobs.push(moduleUrl(target).then((u) => el.setAttribute('src', u))
+            .catch((e) => console.warn('[Folder Runner]', e.message)));
+        } else {
+          el.setAttribute('src', assetUrl(target) + hashOf(src));
+        }
+      } else if (isModuleScript(el)) {
+        const code = el.textContent || '';
+        jobs.push((async () => {
+          const out = await rewriteJs(code, dir);
+          el.textContent = '';
+          el.setAttribute('src', textUrl(out));
+        })());
+      }
+      continue;
+    }
+
+    if (tag === 'style') {
+      const css = el.textContent || '';
+      if (css.trim()) jobs.push(rewriteCss(css, dir).then((t) => { el.textContent = t; }));
+      continue;
+    }
+
+    if (tag === 'link') {
+      const href = el.getAttribute('href');
+      if (!href) continue;
+      const target = resolveAsset(dir, href);
+      if (!target) continue;
+      el.removeAttribute('integrity');
+      el.removeAttribute('crossorigin');
+      const rel = (el.getAttribute('rel') || '').toLowerCase();
+      const isCss = rel.split(/\s+/).indexOf('stylesheet') >= 0 ||
+        (rel === 'preload' && (el.getAttribute('as') || '') === 'style');
+      if (isCss) {
+        jobs.push(cssUrl(target).then((u) => el.setAttribute('href', u))
+          .catch((e) => console.warn('[Folder Runner]', e.message)));
+      } else {
+        el.setAttribute('href', assetUrl(target) + hashOf(href));
+      }
+      continue;
+    }
+
+    if (tag === 'iframe') {
+      const src = el.getAttribute('src');
+      if (!src) continue;
+      const target = resolveAsset(dir, src);
+      if (!target) continue;
+      jobs.push(pageHtml(target).then((page) => {
+        el.removeAttribute('src');
+        el.setAttribute('srcdoc', '<!DOCTYPE html>' + page.html);
+      }).catch(() => { el.setAttribute('src', assetUrl(target)); }));
+      continue;
+    }
+
+    /* attributes */
+    if (el.hasAttribute('srcset') || el.hasAttribute('imagesrcset')) {
+      for (const name of ['srcset', 'imagesrcset']) {
+        if (!el.hasAttribute(name)) continue;
+        const next = rewriteSrcset(el.getAttribute(name), dir);
+        if (next) el.setAttribute(name, next);
+      }
+    }
+    if (el.hasAttribute('style')) {
+      const s = el.getAttribute('style');
+      if (s && s.indexOf('url(') >= 0) jobs.push(rewriteCss(s, dir).then((t) => el.setAttribute('style', t)));
+    }
+    const attrMap = {
+      img: ['src'], source: ['src'], video: ['src', 'poster'], audio: ['src'],
+      track: ['src'], embed: ['src'], input: ['src'], object: ['data'],
+      image: ['href'], use: ['href'], feimage: ['href']
+    };
+    const list = attrMap[tag];
+    if (list) {
+      for (const name of list) {
+        const val = el.getAttribute(name);
+        if (!val) continue;
+        const target = resolveAsset(dir, val);
+        if (!target) continue;
+        el.setAttribute(name, assetUrl(target) + hashOf(val));
+      }
+    }
+    if (tag === 'use' || tag === 'feimage') {
+      const xl = el.getAttribute('xlink:href');
+      if (xl) {
+        const target = resolveAsset(dir, xl);
+        if (target) el.setAttribute('xlink:href', assetUrl(target) + hashOf(xl));
+      }
+    }
+  }
+
+  await Promise.all(jobs);
+
+  const shim = doc.createElement('script');
+  shim.textContent = SHIM_SOURCE;
+  const head = doc.head || doc.documentElement;
+  head.insertBefore(shim, head.firstChild);
+
+  const titleEl = doc.querySelector('title');
+  return {
+    html: '<!DOCTYPE html>\n' + doc.documentElement.outerHTML,
+    title: titleEl ? titleEl.textContent : ''
+  };
+}
+
+/* ─────────────────────────── runtime shim ───────────────────────────
+   Injected as the first script of every running page. It rewrites the
+   page's network + navigation APIs onto the virtual filesystem.
+   ─────────────────────────────────────────────────────────────────── */
+
+function vfsShim() {
+  var W = window;
+  var B = W.__VFS_BRIDGE__;
+  if (!B && W.parent !== W) {
+    try { B = W.parent.__VFS_BRIDGE__ || null; } catch (e) { B = null; }
+  }
+  if (!B || !B.version) return;
+
+  var root = document.documentElement;
+  var pagePath = root.getAttribute('data-vfs-path') || '';
+  var pageDir = root.getAttribute('data-vfs-base') || '';
+
+  var NAT = W.__vfsNative || (W.__vfsNative = {
+    fetch: typeof W.fetch === 'function' ? W.fetch.bind(W) : null,
+    XHR: W.XMLHttpRequest,
+    open: W.open
+  });
+
+  function loc(url) {
+    try { return B.resolve(pageDir, String(url)); } catch (e) { return null; }
+  }
+
+  /* ---- fetch ---- */
+  W.fetch = function (input, init) {
+    var url = '';
+    try { url = typeof input === 'string' ? input : (input && input.url) || String(input); } catch (e) {}
+    var r = loc(url);
+    if (!r || r.external) {
+      if (NAT.fetch) return NAT.fetch(input, init);
+      return Promise.reject(new TypeError('Failed to fetch'));
+    }
+    var file = B.file(r.path);
+    if (!file) {
+      return Promise.resolve(new Response('Not found: ' + r.path, {
+        status: 404, statusText: 'Not Found', headers: { 'content-type': 'text/plain' }
+      }));
+    }
+    return Promise.resolve(new Response(file, {
+      status: 200, statusText: 'OK', headers: { 'content-type': B.mime(r.path) }
+    }));
+  };
+
+  /* ---- XMLHttpRequest ---- */
+  function VXHR() {
+    this.readyState = 0;
+    this.status = 0;
+    this.statusText = '';
+    this.response = null;
+    this.responseText = '';
+    this.responseType = '';
+    this.responseURL = '';
+    this.withCredentials = false;
+    this.timeout = 0;
+    this._headers = {};
+    this._listeners = {};
+    this._async = true;
+    this._body = null;
+    this._ctype = '';
+  }
+  VXHR.prototype.addEventListener = function (t, fn) {
+    (this._listeners[t] || (this._listeners[t] = [])).push(fn);
+  };
+  VXHR.prototype.removeEventListener = function (t, fn) {
+    var a = this._listeners[t];
+    if (a) { var i = a.indexOf(fn); if (i >= 0) a.splice(i, 1); }
+  };
+  VXHR.prototype._emit = function (type) {
+    var ev = { type: type, target: this, currentTarget: this, lengthComputable: false };
+    var h = this['on' + type];
+    if (typeof h === 'function') { try { h.call(this, ev); } catch (e) { setTimeout(function () { throw e; }, 0); } }
+    var a = this._listeners[type];
+    if (a) for (var i = 0; i < a.length; i++) { try { a[i].call(this, ev); } catch (e) {} }
+  };
+  VXHR.prototype.open = function (method, url, async) {
+    this._method = method || 'GET';
+    this._url = url;
+    this._async = async !== false;
+    this.readyState = 1;
+    this._emit('readystatechange');
+  };
+  VXHR.prototype.setRequestHeader = function (k, v) { this._headers[k] = v; };
+  VXHR.prototype.overrideMimeType = function () {};
+  VXHR.prototype.getResponseHeader = function (k) {
+    return String(k).toLowerCase() === 'content-type' ? (this._ctype || null) : null;
+  };
+  VXHR.prototype.getAllResponseHeaders = function () {
+    return this._ctype ? 'content-type: ' + this._ctype + '\r\n' : '';
+  };
+  VXHR.prototype.abort = function () { this._aborted = true; };
+  VXHR.prototype.send = function (body) {
+    var self = this;
+    self._body = body == null ? null : body;
+    var run = function () {
+      if (self._aborted) return;
+      var r = loc(self._url);
+      if (!r || r.external) {
+        if (!NAT.XHR) { fail(self); return; }
+        var x = new NAT.XHR();
+        x.onreadystatechange = function () {
+          self.readyState = x.readyState;
+          self.status = x.status;
+          self.statusText = x.statusText;
+          self._ctype = x.getResponseHeader('content-type') || '';
+          try {
+            self.responseText = x.responseText;
+            self.response = self.responseType ? x.response : x.responseText;
+          } catch (e) {}
+          self._emit('readystatechange');
+        };
+        x.onload = function () { self._emit('load'); self._emit('loadend'); };
+        x.onerror = function () { self._emit('error'); self._emit('loadend'); };
+        try {
+          x.open(self._method, self._url, true);
+          for (var k in self._headers) { try { x.setRequestHeader(k, self._headers[k]); } catch (e) {} }
+          x.responseType = self.responseType === 'json' ? 'text' : self.responseType;
+          x.send(self._body);
+        } catch (e) { fail(self); }
+        return;
+      }
+      var file = B.file(r.path);
+      if (!file) { self.readyState = 4; self.status = 404; self.statusText = 'Not Found'; self._emit('readystatechange'); self._emit('error'); self._emit('loadend'); return; }
+      self._ctype = B.mime(r.path);
+      var done = function (payload, text) {
+        self.readyState = 4;
+        self.status = 200;
+        self.statusText = 'OK';
+        if (!self.responseType || self.responseType === 'text') {
+          self.responseText = text;
+          self.response = text;
+        } else {
+          self.response = payload;
+          if (payload && payload.byteLength) self.responseText = '';
+        }
+        self._emit('readystatechange');
+        self._emit('load');
+        self._emit('loadend');
+      };
+      if (self.responseType === 'arraybuffer') {
+        file.arrayBuffer().then(function (b) { done(b, ''); }, function () { fail(self); });
+      } else if (self.responseType === 'blob') {
+        done(file, '');
+      } else {
+        file.text().then(function (t) {
+          var payload = t;
+          if (self.responseType === 'json') { try { payload = JSON.parse(t); } catch (e) { payload = null; } }
+          done(payload, t);
+        }, function () { fail(self); });
+      }
+    };
+    if (self._async) setTimeout(run, 0); else run();
+  };
+  function fail(self) {
+    self.readyState = 4;
+    self.status = 0;
+    self._emit('readystatechange');
+    self._emit('error');
+    self._emit('loadend');
+  }
+  W.XMLHttpRequest = VXHR;
+
+  /* ---- navigation ---- */
+  function go(target, frag, query) {
+    if (!target) return;
+    B.navigate(target.path, frag || target.hash || '', query || '');
+  }
+
+  W.addEventListener('click', function (e) {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = e.target && e.target.closest ? e.target.closest('a[href], area[href]') : null;
+    if (!a) return;
+    var href = a.getAttribute('href');
+    if (!href || href.charAt(0) === '#') return;
+    var r = loc(href);
+    if (!r || r.external) return;
+    e.preventDefault();
+    go(r, hashOfLocal(href));
+  }, true);
+
+  function hashOfLocal(href) {
+    var i = href.indexOf('#');
+    return i < 0 ? '' : href.slice(i + 1);
+  }
+
+  W.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form || form.tagName !== 'FORM') return;
+    var action = form.getAttribute('action') || pagePath;
+    var r = loc(action);
+    if (!r || r.external) return;
+    e.preventDefault();
+    var q = '';
+    try {
+      var fd = new FormData(form);
+      var parts = [];
+      fd.forEach(function (v, k) {
+        if (typeof v === 'string') parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(v));
+      });
+      q = parts.join('&');
+      if ((form.getAttribute('method') || 'get').toLowerCase() !== 'get' && q) {
+        B.warn('Form POST handled as a GET on the loaded files: ' + (r.path || action));
+      }
+    } catch (err) {}
+    go(r, hashOfLocal(action), q);
+  }, true);
+
+  W.open = function (url) {
+    var r = loc(url);
+    if (r && !r.external) { go(r); return null; }
+    return NAT.open ? NAT.open.apply(W, arguments) : null;
+  };
+
+  if (W.navigator) {
+    try {
+      W.navigator.sendBeacon = function (url) { var r = loc(url); if (r && !r.external) { B.warn('sendBeacon ignored (static files)'); return true; } return false; };
+    } catch (e) {}
+  }
+
+  /* ---- storage fallback for opaque origins (file://) ---- */
+  function memStore() {
+    var m = Object.create(null);
+    return {
+      getItem: function (k) { return k in m ? m[k] : null; },
+      setItem: function (k, v) { m[k] = String(v); },
+      removeItem: function (k) { delete m[k]; },
+      clear: function () { m = Object.create(null); },
+      key: function (i) { var ks = Object.keys(m); return i < ks.length ? ks[i] : null; },
+      get length() { return Object.keys(m).length; }
+    };
+  }
+  var stores = {};
+  ['localStorage', 'sessionStorage'].forEach(function (name) {
+    try {
+      void W[name].length;
+    } catch (e) {
+      try {
+        stores[name] = memStore();
+        Object.defineProperty(W, name, { configurable: true, get: function () { return stores[name]; } });
+      } catch (e2) {}
+    }
+  });
+
+  W.__VFS_INFO = { page: pagePath, dir: pageDir };
+}
+
+/* ─────────────────────────── bridge ─────────────────────────── */
+
+const bridge = {
+  version: 1,
+  mime: mimeFor,
+  file(path) { return state.files.get(path) || null; },
+  asset(path) { return assetUrl(path); },
+  resolve(fromDir, spec) {
+    if (!spec) return null;
+    const s = String(spec);
+    if (!s || s[0] === '#') return { external: true };
+    if (s.slice(0, 5) === 'data:' || s.slice(0, 5) === 'blob:') return { external: true };
+    if (isExternal(s)) return { external: true };
+    const target = resolveAsset(fromDir || state.mount, s);
+    if (!target) return { external: false, path: norm(s), hash: '' };
+    return { external: false, path: target, hash: hashOf(s) };
+  },
+  text(path) { return readText(path); },
+  css(path) { return cssUrl(path); },
+  module(path) { return moduleUrl(path); },
+  page(path) { return pageHtml(path); },
+  navigate(path, frag, query) { return navigate(path, { fragment: frag, query, push: true }); },
+  warn(msg) {
+    console.warn('[Folder Runner]', msg);
+    toast(msg, 5000);
+  }
+};
+
+/* ─────────────────────────── navigation ─────────────────────────── */
+
+const frame = $('#frame');
+
+async function navigate(path, opts) {
+  const options = opts || {};
+  try {
+    setBusy(true);
+    const page = await pageHtml(path);
+    const win = frame.contentWindow;
+    const doc = frame.contentDocument || (win && win.document);
+    if (!doc) throw new Error('Cannot access the frame document.');
+
+    win.__VFS_BRIDGE__ = bridge;
+    doc.open();
+    doc.write(page.html);
+    doc.close();
+
+    state.current = path;
+    if (options.push !== false) {
+      state.history = state.history.slice(0, state.hIndex + 1);
+      state.history.push({ path, query: options.query || '' });
+      state.hIndex = state.history.length - 1;
+    }
+    if (options.fragment) {
+      try { win.location.hash = options.fragment; } catch (e) {}
+    }
+    document.title = (page.title ? page.title + ' — ' : '') + 'Folder Runner';
+    updateChrome();
+  } catch (err) {
+    console.error(err);
+    toast('Could not run ' + path + ' — ' + err.message, 6000);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function setBusy(on) {
+  state.loading += on ? 1 : -1;
+  if (state.loading < 0) state.loading = 0;
+  renderWhere();
+}
+
+function updateChrome() {
+  const has = !!state.current;
+  $('#btnBack').disabled = state.hIndex <= 0;
+  $('#btnReload').disabled = !has;
+  $('#entrySel').disabled = state.files.size === 0;
+  $('#btnChange').disabled = state.files.size === 0;
+  $('#stage').classList.toggle('on', has);
+  $('#welcome').classList.toggle('hide', has);
+  $('#entrySel').value = state.current || '';
+  renderWhere();
+}
+
+function renderWhere() {
+  const el = $('#where');
+  if (!state.files.size) { el.textContent = 'No folder loaded'; return; }
+  const parts = ['/' + (state.rootName || 'folder')];
+  if (state.current) parts.push(state.current);
+  el.textContent = parts.join(' / ') +
+    ' · ' + state.files.size.toLocaleString() + ' files' +
+    (state.loading ? ' · loading…' : '');
+}
+
+/* ─────────────────────────── loading a folder ─────────────────────────── */
+
+const SKIP = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini|__MACOSX)(\/|$)/i;
+
+function addEntry(relPath, file) {
+  const p = norm(relPath);
+  if (!p || SKIP.test(p)) return false;
+  state.files.set(p, file);
+  return true;
+}
+
+function resetFolder() {
+  for (const u of state.asset.values()) { try { URL.revokeObjectURL(u); } catch (e) {} }
+  state.asset.clear();
+  state.text.clear();
+  state.cssUrl.clear();
+  state.modUrl.clear();
+  state.pages.clear();
+  state.modBusy.clear();
+  state.files.clear();
+  state.ci = null;
+  state.mount = '';
+  state.entry = '';
+  state.current = '';
+  state.history = [];
+  state.hIndex = -1;
+  state.rootName = '';
+  $('#stage').classList.remove('on');
+  $('#welcome').classList.remove('hide');
+  $('#entrySel').innerHTML = '';
+  $('#entrySel').disabled = true;
+  $('#btnBack').disabled = true;
+  $('#btnReload').disabled = true;
+  frame.removeAttribute('srcdoc');
+  try { const d = frame.contentDocument; if (d) { d.open(); d.write(''); d.close(); } } catch (e) {}
+}
+
+function stripCommonRoot() {
+  let first = null;
+  for (const p of state.files.keys()) {
+    const seg = p.split('/')[0];
+    if (!seg.includes('.')) { if (first === null) first = seg; else if (first !== seg) return ''; }
+    else return '';
+  }
+  if (!first) return '';
+  /* every path must live under that folder and at least one must be nested deeper */
+  const prefix = first + '/';
+  for (const p of state.files.keys()) if (p.slice(0, prefix.length) !== prefix) return '';
+  let nested = false;
+  for (const p of state.files.keys()) if (p.length > prefix.length + 1) { nested = true; break; }
+  if (!nested) return '';
+  const moved = new Map();
+  for (const [p, f] of state.files) moved.set(p.slice(prefix.length), f);
+  state.files = moved;
+  state.ci = null;
+  return first;
+}
+
+const HTML_RE = /\.(html?|xhtml)$/i;
+
+function htmlFiles() {
+  const out = [];
+  for (const p of state.files.keys()) if (HTML_RE.test(p)) out.push(p);
+  out.sort((a, b) => {
+    const da = a.split('/').length, db = b.split('/').length;
+    if (da !== db) return da - db;
+    return a.localeCompare(b);
+  });
+  return out;
+}
+
+function pickEntry() {
+  const all = htmlFiles();
+  if (!all.length) return '';
+  const direct = ['index.html', 'index.htm']
+    .map((n) => all.find((p) => basename(p).toLowerCase() === n && !p.includes('/')))
+    .filter(Boolean);
+  if (direct.length) return direct[0];
+  const anyIndex = all.find((p) => /(^|\/)index\.html?$/i.test(p));
+  return anyIndex || all[0];
+}
+
+function buildEntryList(entry) {
+  const sel = $('#entrySel');
+  sel.innerHTML = '';
+  for (const p of htmlFiles()) {
+    const o = document.createElement('option');
+    o.value = p;
+    o.textContent = p;
+    sel.appendChild(o);
+  }
+  sel.value = entry;
+  sel.disabled = false;
+}
+
+async function start(pickedEntry) {
+  if (!state.files.size) { toast('That folder has no files in it.'); return; }
+  state.rootName = state.rootName || 'folder';
+  const entry = pickedEntry || pickEntry();
+  if (!entry) { toast('No HTML file found in that folder — drop a folder that has at least one .html file.'); return; }
+  state.entry = entry;
+  state.mount = dirname(entry);
+  buildEntryList(entry);
+  await navigate(entry, { push: true });
+}
+
+/* --- folder input --- */
+function handleFileList(list) {
+  resetFolder();
+  let count = 0;
+  for (const file of list) {
+    const rel = file.webkitRelativePath || file.relativePath || file.name;
+    if (addEntry(rel, file)) count++;
+  }
+  const root = stripCommonRoot();
+  state.rootName = root || 'folder';
+  renderWhere();
+  toast(count.toLocaleString() + ' files loaded');
+  start();
+}
+
+/* --- drag & drop of a folder --- */
+function readEntry(entry, prefix, out) {
+  return new Promise((resolve) => {
+    if (entry.isFile) {
+      entry.file((f) => { out.push({ path: prefix + entry.name, file: f }); resolve(); }, () => resolve());
+      return;
+    }
+    if (!entry.isDirectory) { resolve(); return; }
+    const reader = entry.createReader();
+    const dir = prefix + entry.name + '/';
+    const step = () => {
+      reader.readEntries(async (batch) => {
+        if (!batch.length) { resolve(); return; }
+        for (const child of batch) await readEntry(child, dir, out);
+        step();
+      }, () => resolve());
+    };
+    step();
+  });
+}
+
+async function dropItems(items) {
+  const list = [];
+  const entries = [];
+  for (const item of items) {
+    if (item.kind !== 'file') continue;
+    if (item.webkitGetAsEntry) {
+      const e = item.webkitGetAsEntry();
+      if (e) { entries.push(e); continue; }
+    }
+    const f = item.getAsFile();
+    if (f) list.push(f);
+  }
+  if (entries.length) {
+    const out = [];
+    for (const e of entries) await readEntry(e, '', out);
+    for (const it of out) list.push(Object.assign(it.file, { relativePath: it.path }));
+  }
+  if (!list.length) { toast('Nothing usable was dropped.'); return; }
+  handleFileList(list);
+}
+
+let dragDepth = 0;
+const overlay = $('#overlay');
+window.addEventListener('dragenter', (e) => {
+  if (!e.dataTransfer || Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') < 0) return;
+  e.preventDefault();
+  dragDepth++;
+  overlay.classList.add('on');
+});
+window.addEventListener('dragover', (e) => {
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  e.preventDefault();
+});
+window.addEventListener('dragleave', () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) overlay.classList.remove('on');
+});
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  overlay.classList.remove('on');
+  if (!e.dataTransfer) return;
+  if (e.dataTransfer.items && e.dataTransfer.items.length) {
+    dropItems(e.dataTransfer.items).catch((err) => toast('Could not read that folder: ' + err.message, 6000));
+  } else if (e.dataTransfer.files.length) {
+    handleFileList(e.dataTransfer.files);
+  }
+});
+
+/* ─────────────────────────── UI wiring ─────────────────────────── */
+
+$('#btnFolder').addEventListener('click', () => $('#dirInput').click());
+$('#btnFiles').addEventListener('click', () => $('#filesInput').click());
+$('#drop').addEventListener('click', () => $('#dirInput').click());
+$('#btnChange').addEventListener('click', () => $('#dirInput').click());
+
+$('#dirInput').addEventListener('change', (e) => {
+  const files = Array.from(e.target.files || []);
+  if (files.length) handleFileList(files);
+  e.target.value = '';
+});
+$('#filesInput').addEventListener('change', (e) => {
+  const files = Array.from(e.target.files || []);
+  if (files.length) handleFileList(files);
+  e.target.value = '';
+});
+
+$('#entrySel').addEventListener('change', (e) => {
+  const p = e.target.value;
+  if (!p || p === state.current) return;
+  state.mount = dirname(p);
+  navigate(p, { push: true });
+});
+
+$('#btnBack').addEventListener('click', () => {
+  if (state.hIndex <= 0) return;
+  state.hIndex--;
+  const target = state.history[state.hIndex];
+  state.mount = dirname(target.path);
+  navigate(target.path, { push: false });
+});
+
+$('#btnReload').addEventListener('click', () => {
+  if (!state.current) return;
+  state.pages.delete(state.current);
+  state.modUrl.delete(state.current);
+  navigate(state.current, { push: false });
+});
+
+/* expose a tiny hook so the runner can be scripted/tested without the file pickers */
+window.FolderRunner = {
+  version: 1,
+  load(files) {
+    const prepared = [];
+    for (const [rel, fileOrText] of Object.entries(files)) {
+      if (fileOrText instanceof Blob) {
+        prepared.push(Object.assign(fileOrText, { relativePath: rel }));
+      } else {
+        const name = basename(rel);
+        const blob = new Blob([String(fileOrText)], { type: mimeFor(name) });
+        prepared.push(Object.assign(blob, { relativePath: rel }));
+      }
+    }
+    handleFileList(prepared);
+  },
+  get state() { return { files: state.files.size, current: state.current, entry: state.entry }; }
+};
+
+renderWhere();
+})();
+</script>
+</body>
+</html>
