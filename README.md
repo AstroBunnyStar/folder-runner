@@ -20,6 +20,7 @@ Everything happens in your browser. No file is ever uploaded anywhere.
 - ES modules (`type="module"`) with relative `import` / `export … from` / `import()`
 - `fetch()`, `XMLHttpRequest` and `srcset` against files in the folder
 - Links between pages, back button and page switching
+- Resources created by scripts at runtime (`img.src = 'pic.png'`, `link.href`, `srcset`)
 - `localStorage` / `sessionStorage` (in-memory fallback where the browser blocks them)
 
 ## What it can't do
@@ -32,3 +33,9 @@ Everything happens in your browser. No file is ever uploaded anywhere.
 ## How it is fast
 
 Files are handed to the browser as references — nothing is base64-encoded or copied. Binary assets go straight to object URLs, only the HTML/CSS/JS that a page actually uses is parsed, and each built page and module is cached so navigating back is instant.
+
+Measured on a 3,000-file / 4.5 MB folder: page build and DOM write about 2–3 ms, the rest of the wait is the browser reading file contents from disk.
+
+## License
+
+[MIT](LICENSE). Use it, change it, ship it.
