@@ -205,7 +205,10 @@ const state = {
   history: [],
   hIndex: -1,
   rootName: '',
-  loading: 0
+  loading: 0,
+  runId: 0,
+  runDone: 0,
+  timings: {}
 };
 
 /* ─────────────────────────── resolution ─────────────────────────── */
@@ -268,7 +271,9 @@ async function readText(path) {
   if (state.text.has(path)) return state.text.get(path);
   const f = state.files.get(path);
   if (!f) return null;
+  const t0 = performance.now();
   const t = await f.text();
+  state.timings.readMs = +(+(state.timings.readMs || 0) + (performance.now() - t0)).toFixed(1);
   if (t.length <= 12 * 1024 * 1024) state.text.set(path, t);
   return t;
 }
@@ -771,6 +776,97 @@ function vfsShim() {
     } catch (e) {}
   }
 
+  /* ---- resources created at runtime (img.src = 'x.png', …) ---- */
+  var EMPTY = {};
+  function emptyUrl(kind) {
+    if (!EMPTY[kind]) {
+      EMPTY[kind] = URL.createObjectURL(new Blob([''], { type: kind === 'css' ? 'text/css' : 'text/javascript' }));
+    }
+    return EMPTY[kind];
+  }
+  function relLike(v) {
+    if (typeof v !== 'string' || !v) return false;
+    if (v.charAt(0) === '#') return false;
+    return !/^(?:[a-z][a-z0-9+.\-]*:|\/\/)/i.test(v);
+  }
+  function fragOf(v) { var i = v.indexOf('#'); return i < 0 ? '' : v.slice(i); }
+  function pathOf(v) {
+    var r = loc(v);
+    if (!r || r.external) return null;
+    return B.file(r.path) ? r.path : null;
+  }
+  function rewriteSrcsetValue(el, value) {
+    if (typeof value !== 'string' || value.indexOf('data:') >= 0) return value;
+    return value.split(',').map(function (piece) {
+      var s = piece.trim();
+      if (!s) return piece;
+      var parts = s.split(/\s+/);
+      var u = rewriteDynamic(el, 'src', parts[0]);
+      if (u !== parts[0]) parts[0] = u;
+      return parts.join(' ');
+    }).join(', ');
+  }
+  function rewriteDynamic(el, name, value) {
+    try {
+      if (name === 'srcset' || name === 'imagesrcset') return rewriteSrcsetValue(el, value);
+      if (!relLike(value)) return value;
+      var p = pathOf(value);
+      if (!p) return value;
+      var tag = el && el.tagName ? String(el.tagName).toLowerCase() : '';
+      var isCss = tag === 'link' && /(^|\s)stylesheet(\s|$)/i.test(el.getAttribute('rel') || '');
+      var isModule = tag === 'script' && (el.getAttribute('type') || '').toLowerCase() === 'module';
+      if (isCss || isModule) {
+        var frag = fragOf(value);
+        var job = isCss ? B.css(p) : B.module(p);
+        if (job && job.then) {
+          job.then(function (u) { try { el.setAttribute(isCss ? 'href' : 'src', u + frag); } catch (e) {} }, function () {});
+        }
+        return emptyUrl(isCss ? 'css' : 'js');
+      }
+      return B.asset(p) + fragOf(value);
+    } catch (e) { return value; }
+  }
+
+  var RES_ATTRS = { src: 1, href: 1, poster: 1, data: 1, 'xlink:href': 1 };
+  var nativeSetAttribute = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function (name, value) {
+    try {
+      var n = String(name).toLowerCase();
+      if (typeof value === 'string' && this.tagName) {
+        var t = String(this.tagName).toLowerCase();
+        var isAnchor = (t === 'a' || t === 'area') && (n === 'href' || n === 'xlink:href');
+        if (!isAnchor && (RES_ATTRS[n] || n === 'srcset' || n === 'imagesrcset')) {
+          value = rewriteDynamic(this, n, value);
+        }
+      }
+    } catch (e) {}
+    return nativeSetAttribute.call(this, name, value);
+  };
+
+  function patchProp(Ctor, prop) {
+    try {
+      if (typeof Ctor !== 'function') return;
+      var d = Object.getOwnPropertyDescriptor(Ctor.prototype, prop);
+      if (!d || !d.set) return;
+      Object.defineProperty(Ctor.prototype, prop, {
+        configurable: true,
+        enumerable: d.enumerable,
+        get: d.get,
+        set: function (v) { return d.set.call(this, rewriteDynamic(this, prop, v)); }
+      });
+    } catch (e) {}
+  }
+  patchProp(W.HTMLImageElement, 'src');
+  patchProp(W.HTMLImageElement, 'srcset');
+  patchProp(W.HTMLSourceElement, 'src');
+  patchProp(W.HTMLSourceElement, 'srcset');
+  patchProp(W.HTMLMediaElement, 'src');
+  patchProp(W.HTMLMediaElement, 'poster');
+  patchProp(W.HTMLScriptElement, 'src');
+  patchProp(W.HTMLLinkElement, 'href');
+  patchProp(W.HTMLEmbedElement, 'src');
+  patchProp(W.HTMLObjectElement, 'data');
+
   /* ---- storage fallback for opaque origins (file://) ---- */
   function memStore() {
     var m = Object.create(null);
@@ -830,11 +926,24 @@ const bridge = {
 
 const frame = $('#frame');
 
+let readyWaiters = [];
+function markReady() {
+  const waiters = readyWaiters;
+  readyWaiters = [];
+  for (const fn of waiters) fn();
+}
+function whenReady() {
+  return new Promise((resolve) => readyWaiters.push(resolve));
+}
+
 async function navigate(path, opts) {
   const options = opts || {};
+  const run = ++state.runId;
+  const t0 = performance.now();
   try {
     setBusy(true);
     const page = await pageHtml(path);
+    const tBuild = performance.now();
     const win = frame.contentWindow;
     const doc = frame.contentDocument || (win && win.document);
     if (!doc) throw new Error('Cannot access the frame document.');
@@ -843,6 +952,10 @@ async function navigate(path, opts) {
     doc.open();
     doc.write(page.html);
     doc.close();
+    const tWrite = performance.now();
+    state.timings.buildMs = +(tBuild - t0).toFixed(1);
+    state.timings.renderMs = +(tWrite - tBuild).toFixed(1);
+    state.timings.totalMs = +(tWrite - t0).toFixed(1);
 
     state.current = path;
     if (options.push !== false) {
@@ -859,7 +972,11 @@ async function navigate(path, opts) {
     console.error(err);
     toast('Could not run ' + path + ' — ' + err.message, 6000);
   } finally {
+    state.timings.wallMs = +(performance.now() - t0).toFixed(1);
+    state.timings.run = run;
     setBusy(false);
+    state.runDone = run;
+    markReady();
   }
 }
 
@@ -918,6 +1035,8 @@ function resetFolder() {
   state.history = [];
   state.hIndex = -1;
   state.rootName = '';
+  state.timings = {};
+  state.loads = (state.loads || 0) + 1;
   $('#stage').classList.remove('on');
   $('#welcome').classList.remove('hide');
   $('#entrySel').innerHTML = '';
@@ -1000,12 +1119,15 @@ async function start(pickedEntry) {
 /* --- folder input --- */
 function handleFileList(list) {
   resetFolder();
+  const t0 = performance.now();
   let count = 0;
   for (const file of list) {
     const rel = file.webkitRelativePath || file.relativePath || file.name;
     if (addEntry(rel, file)) count++;
   }
   const root = stripCommonRoot();
+  state.timings.enumerateMs = +(performance.now() - t0).toFixed(1);
+  state.timings.files = count;
   state.rootName = root || 'folder';
   renderWhere();
   toast(count.toLocaleString() + ' files loaded');
@@ -1138,6 +1260,11 @@ window.FolderRunner = {
     }
     handleFileList(prepared);
   },
+  whenReady,
+  get timings() { return Object.assign({}, state.timings); },
+  get runId() { return state.runId; },
+  get runDone() { return state.runDone; },
+  get loads() { return state.loads || 0; },
   get state() { return { files: state.files.size, current: state.current, entry: state.entry }; }
 };
 
